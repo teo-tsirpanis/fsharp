@@ -7,6 +7,7 @@ namespace Microsoft.FSharp.Collections
 open Microsoft.FSharp.Core
 open Microsoft.FSharp.Core.Operators
 open System.Collections.Generic
+open System.Diagnostics.CodeAnalysis
 
 module HashIdentity =
 
@@ -25,7 +26,8 @@ module HashIdentity =
                 LanguagePrimitives.PhysicalEquality x y
         }
 
-    let inline NonStructural<'T when 'T: equality and 'T: (static member (=): 'T * 'T -> bool)> =
+    let inline NonStructural<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T
+        when 'T: equality and 'T: (static member (=): 'T * 'T -> bool)> =
         { new IEqualityComparer<'T> with
             member _.GetHashCode(x) =
                 NonStructuralComparison.hash x
@@ -50,7 +52,7 @@ module ComparisonIdentity =
     let inline Structural<'T when 'T: comparison> : IComparer<'T> =
         LanguagePrimitives.FastGenericComparer<'T>
 
-    let inline NonStructural<'T
+    let inline NonStructural<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T
         when 'T: (static member (<): 'T * 'T -> bool) and 'T: (static member (>): 'T * 'T -> bool)> : IComparer<'T> =
         { new IComparer<'T> with
             member _.Compare(x, y) =
