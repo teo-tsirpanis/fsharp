@@ -426,6 +426,11 @@ namespace System.Diagnostics.CodeAnalysis
         member val Uri = "" with get, set
 #endif
 
+    // Common DynamicallyAccessedMemberTypes combinations.
+    module internal DynamicallyAccessed =
+        [<Microsoft.FSharp.Core.Literal>]
+        let AllMethods = DynamicallyAccessedMemberTypes.PublicMethods ||| DynamicallyAccessedMemberTypes.NonPublicMethods
+
 namespace Microsoft.FSharp.Core
 
     open System
@@ -2513,7 +2518,7 @@ namespace Microsoft.FSharp.Core
 
         let inline ParseSingle (s:string) = Single.Parse(removeUnderscores s,NumberStyles.Float, CultureInfo.InvariantCulture)
             
-        type GenericZeroDynamicImplTable<'T>() = 
+        type GenericZeroDynamicImplTable<[<DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)>] 'T>() = 
             static let result : 'T = 
                 // The dynamic implementation
                 let ty = typeof<'T>
@@ -2536,7 +2541,7 @@ namespace Microsoft.FSharp.Core
                    unboxPrim<'T> (pinfo.GetValue(null,null))
             static member Result : 'T = result
                    
-        type GenericOneDynamicImplTable<'T>() = 
+        type GenericOneDynamicImplTable<[<DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)>] 'T>() = 
             static let result : 'T = 
                 // The dynamic implementation
                 let ty = typeof<'T>
@@ -2560,10 +2565,12 @@ namespace Microsoft.FSharp.Core
 
             static member Result : 'T = result
 
-        let GenericZeroDynamic<'T>() : 'T = GenericZeroDynamicImplTable<'T>.Result
-        let GenericOneDynamic<'T>() : 'T = GenericOneDynamicImplTable<'T>.Result
+        let GenericZeroDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)>] 'T>() : 'T =
+            GenericZeroDynamicImplTable<'T>.Result
+        let GenericOneDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)>] 'T>() : 'T =
+            GenericOneDynamicImplTable<'T>.Result
 
-        let inline GenericZero< ^T when ^T : (static member Zero : ^T) > : ^T =
+        let inline GenericZero<[<DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)>] ^T when ^T : (static member Zero : ^T) > : ^T =
             GenericZeroDynamic<(^T)>()
             when ^T : int32       = 0
             when ^T : float       = 0.0
@@ -2583,7 +2590,7 @@ namespace Microsoft.FSharp.Core
              // this condition is used whenever ^T is resolved to a nominal type
             when ^T : ^T = (^T : (static member Zero : ^T) ())
 
-        let inline GenericOne< ^T when ^T : (static member One : ^T) > : ^T =
+        let inline GenericOne<[<DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)>] ^T when ^T : (static member One : ^T) > : ^T =
             GenericOneDynamic<(^T)>()
             when ^T : int32       = 1
             when ^T : float       = 1.0
@@ -2604,36 +2611,33 @@ namespace Microsoft.FSharp.Core
              // That is, not in the generic implementation of '+'
             when ^T : ^T = (^T : (static member One : ^T) ())
 
-        type Type with
-            /// Gets a single static non-conversion operator or method by types
-            member inline this.GetSingleStaticMethodByTypes(name: string, parameterTypes: Type[]) =
-                let staticBindingFlags = (# "" 0b111000 : BindingFlags #) // BindingFlags.Static ||| BindingFlags.Public ||| BindingFlags.NonPublic
-                this.GetMethod(name, staticBindingFlags, null, parameterTypes, null )
+        /// Gets a single static non-conversion operator or method by types
+        let inline getSingleStaticMethodByTypes([<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] ty: Type, name: string, parameterTypes: Type[]) =
+            let staticBindingFlags = (# "" 0b111000 : BindingFlags #) // BindingFlags.Static ||| BindingFlags.Public ||| BindingFlags.NonPublic
+            ty.GetMethod(name, staticBindingFlags, null, parameterTypes, null )
 
-            // Logic based on https://github.com/dotnet/runtime/blob/f66b142980b2b0df738158457458e003944dc7f6/src/libraries/System.Linq.Expressions/src/System/Dynamic/Utils/TypeUtils.cs#L662
-            /// Gets a single static conversion operator by types
-            member inline this.GetSingleStaticConversionOperatorByTypes(fromType : Type, toType : Type) =
-                let staticBindingFlags = (# "" 0b111000 : BindingFlags #) // BindingFlags.Static ||| BindingFlags.Public ||| BindingFlags.NonPublic
-                let mutable ret = null
-                for mi in this.GetMethods staticBindingFlags do
-                    if (System.String.Equals(mi.Name, "op_Implicit") || System.String.Equals(mi.Name, "op_Explicit")) &&
-                       (let p = mi.GetParameters() in p.Length = 1 && (get p 0).ParameterType.IsEquivalentTo fromType) && mi.ReturnType.IsEquivalentTo toType then
-                       ret <- mi
-                ret
+        // Logic based on https://github.com/dotnet/runtime/blob/f66b142980b2b0df738158457458e003944dc7f6/src/libraries/System.Linq.Expressions/src/System/Dynamic/Utils/TypeUtils.cs#L662
+        /// Gets a single static conversion operator by types
+        let inline getSingleStaticConversionOperatorByTypes([<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] ty: Type, fromType : Type, toType : Type) =
+            let staticBindingFlags = (# "" 0b111000 : BindingFlags #) // BindingFlags.Static ||| BindingFlags.Public ||| BindingFlags.NonPublic
+            let mutable ret = null
+            for mi in ty.GetMethods staticBindingFlags do
+                if (System.String.Equals(mi.Name, "op_Implicit") || System.String.Equals(mi.Name, "op_Explicit")) &&
+                   (let p = mi.GetParameters() in p.Length = 1 && (get p 0).ParameterType.IsEquivalentTo fromType) && mi.ReturnType.IsEquivalentTo toType then
+                   ret <- mi
+            ret
 
-        let UnaryDynamicImpl nm : ('T -> 'U) =
-             let aty = typeof<'T>
-             let minfo = aty.GetSingleStaticMethodByTypes(nm, [| aty |])
+        let UnaryDynamicImpl<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T, 'U> nm : ('T -> 'U) =
+             let minfo = getSingleStaticMethodByTypes(typeof<'T>, nm, [| typeof<'T> |])
              (fun x -> unboxPrim<_>(minfo.Invoke(null,[| box x|])))
 
-        let BinaryDynamicImpl nm : ('T -> 'U -> 'V) =
-             let aty = typeof<'T>
-             let bty = typeof<'U>
-             let minfo = aty.GetSingleStaticMethodByTypes(nm, [| aty; bty |])
+        let BinaryDynamicImpl<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T, 'U, 'V> nm : ('T -> 'U -> 'V) =
+             let minfo = getSingleStaticMethodByTypes(typeof<'T>, nm, [| typeof<'T>; typeof<'U> |])
              (fun x y -> unboxPrim<_>(minfo.Invoke(null,[| box x; box y|])))
 
         // Legacy dynamic implementation of operator resolution if no built in solution is used and no witness passed
-        type UnaryOpDynamicImplTable<'OpInfo,'T,'U>() = 
+        type UnaryOpDynamicImplTable<'OpInfo,[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T,
+            [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'U>() = 
             static let mutable meth : MethodInfo = null
 
             static member Invoke opName (x: 'T) : 'U = 
@@ -2645,11 +2649,11 @@ namespace Microsoft.FSharp.Core
                     let ameth =
                         if System.String.Equals(opName, "op_Explicit") then
                             let aty2 = typeof<'U>
-                            match aty.GetSingleStaticConversionOperatorByTypes(aty, aty2) with
-                            | null -> aty2.GetSingleStaticConversionOperatorByTypes(aty, aty2)
+                            match getSingleStaticConversionOperatorByTypes(aty, aty, aty2) with
+                            | null -> getSingleStaticConversionOperatorByTypes(aty2, aty, aty2)
                             | ameth -> ameth
                         else
-                            aty.GetSingleStaticMethodByTypes(opName, [| aty |])
+                            getSingleStaticMethodByTypes(aty, opName, [| aty |])
                     match ameth with
                     | null -> raise (NotSupportedException (SR.GetString(SR.dyInvOpAddCoerce)))
                     | res -> 
@@ -2658,7 +2662,8 @@ namespace Microsoft.FSharp.Core
                 unboxPrim<'U> (meth.Invoke(null,[| box x |]))
 
         // Legacy dynamic implementation of operator resolution, if no built in solution is used and no witness passed
-        type BinaryOpDynamicImplTable<'OpInfo,'T1,'T2,'U>() = 
+        type BinaryOpDynamicImplTable<'OpInfo, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1,
+            [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2,'U>() = 
             static let mutable meth : MethodInfo = null
 
             static member Invoke opName (x: 'T1) (y: 'T2) : 'U =
@@ -2668,10 +2673,10 @@ namespace Microsoft.FSharp.Core
                     let aty = typeof<'T1>
                     let bty = typeof<'T2>
 
-                    let ameth = aty.GetSingleStaticMethodByTypes(opName, [| aty; bty |])
+                    let ameth = getSingleStaticMethodByTypes(aty, opName, [| aty; bty |])
                     let bmeth = 
                         if Type.op_Equality(aty, bty) then null else
-                        bty.GetSingleStaticMethodByTypes(opName, [| aty; bty |])
+                        getSingleStaticMethodByTypes(bty, opName, [| aty; bty |])
                     match ameth, bmeth with
                     | null, null -> raise (NotSupportedException (SR.GetString(SR.dyInvOpAddCoerce)))
                     | m, null | null, m ->
@@ -2682,7 +2687,7 @@ namespace Microsoft.FSharp.Core
 
         type OpAdditionInfo = class end
 
-        let AdditionDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let AdditionDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type3eq<'T1, 'T2, 'U, int32> then convPrim<_,'U> (# "add" (convPrim<_,int32> x) (convPrim<_,int32> y) : int32 #) 
             elif type3eq<'T1, 'T2, 'U, float> then convPrim<_,'U> (# "add" (convPrim<_,float> x) (convPrim<_,float> y) : float #) 
             elif type3eq<'T1, 'T2, 'U, float32> then convPrim<_,'U> (# "add" (convPrim<_,float32> x) (convPrim<_,float32> y) : float32 #) 
@@ -2702,7 +2707,7 @@ namespace Microsoft.FSharp.Core
 
         type OpSubtractionInfo = class end 
 
-        let SubtractionDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let SubtractionDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type3eq<'T1, 'T2, 'U, int32> then convPrim<_,'U> (# "sub" (convPrim<_,int32> x) (convPrim<_,int32> y) : int32 #) 
             elif type3eq<'T1, 'T2, 'U, float> then convPrim<_,'U> (# "sub" (convPrim<_,float> x) (convPrim<_,float> y) : float #) 
             elif type3eq<'T1, 'T2, 'U, float32> then convPrim<_,'U> (# "sub" (convPrim<_,float32> x) (convPrim<_,float32> y) : float32 #) 
@@ -2721,7 +2726,7 @@ namespace Microsoft.FSharp.Core
 
         type OpMultiplyInfo = class end
 
-        let MultiplyDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let MultiplyDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type3eq<'T1, 'T2, 'U,  int32> then convPrim<_,'U> (# "mul" (convPrim<_,int32> x) (convPrim<_,int32> y) : int32 #) 
             elif type3eq<'T1, 'T2, 'U,  float> then convPrim<_,'U> (# "mul" (convPrim<_,float> x) (convPrim<_,float> y) : float #) 
             elif type3eq<'T1, 'T2, 'U,  float32> then convPrim<_,'U> (# "mul" (convPrim<_,float32> x) (convPrim<_,float32> y) : float32 #) 
@@ -2739,7 +2744,7 @@ namespace Microsoft.FSharp.Core
 
         type OpDivisionInfo = class end
 
-        let DivisionDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let DivisionDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type3eq<'T1, 'T2, 'U,int32> then convPrim<_,'U> (# "div" (convPrim<_,int32> x) (convPrim<_,int32> y) : int32 #) 
             elif type3eq<'T1, 'T2, 'U,float> then convPrim<_,'U> (# "div" (convPrim<_,float> x) (convPrim<_,float> y) : float #) 
             elif type3eq<'T1, 'T2, 'U,float32> then convPrim<_,'U> (# "div" (convPrim<_,float32> x) (convPrim<_,float32> y) : float32 #) 
@@ -2757,7 +2762,7 @@ namespace Microsoft.FSharp.Core
 
         type OpModulusInfo = class end
 
-        let ModulusDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U  =
+        let ModulusDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U  =
             if type3eq<'T1, 'T2, 'U, int32> then convPrim<_,'U> (# "rem" (convPrim<_,int32> x) (convPrim<_,int32> y) : int32 #) 
             elif type3eq<'T1, 'T2, 'U, float> then convPrim<_,'U> (# "rem" (convPrim<_,float> x) (convPrim<_,float> y) : float #) 
             elif type3eq<'T1, 'T2, 'U, float32> then convPrim<_,'U> (# "rem" (convPrim<_,float32> x) (convPrim<_,float32> y) : float32 #) 
@@ -2774,7 +2779,7 @@ namespace Microsoft.FSharp.Core
             else BinaryOpDynamicImplTable<OpModulusInfo, 'T1, 'T2, 'U>.Invoke "op_Modulus" x y
 
         type OpUnaryNegationInfo = class end
-        let UnaryNegationDynamic<'T,'U> (value: 'T) : 'U =
+        let UnaryNegationDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T,[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'U> (value: 'T) : 'U =
             if type2eq<'T, 'U, int32> then convPrim<_,'U> (# "neg" (convPrim<_,int32> value) : int32 #) 
             elif type2eq<'T, 'U, float> then convPrim<_,'U> (# "neg" (convPrim<_,float> value) : float #) 
             elif type2eq<'T, 'U, float32> then convPrim<_,'U> (# "neg" (convPrim<_,float32> value) : float32 #) 
@@ -2787,7 +2792,7 @@ namespace Microsoft.FSharp.Core
 
         type OpCheckedAdditionInfo = class end
 
-        let CheckedAdditionDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let CheckedAdditionDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type3eq<'T1, 'T2, 'U, int32> then convPrim<_,'U> (# "add.ovf" (convPrim<_,int32> x) (convPrim<_,int32> y) : int32 #) 
             elif type3eq<'T1, 'T2, 'U, float> then convPrim<_,'U> (# "add" (convPrim<_,float> x) (convPrim<_,float> y) : float #) 
             elif type3eq<'T1, 'T2, 'U, float32> then convPrim<_,'U> (# "add" (convPrim<_,float32> x) (convPrim<_,float32> y) : float32 #) 
@@ -2807,7 +2812,7 @@ namespace Microsoft.FSharp.Core
 
         type OpCheckedSubtractionInfo = class end
 
-        let CheckedSubtractionDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let CheckedSubtractionDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type3eq<'T1, 'T2, 'U, int32> then convPrim<_,'U> (# "sub.ovf" (convPrim<_,int32> x) (convPrim<_,int32> y) : int32 #) 
             elif type3eq<'T1, 'T2, 'U, float> then convPrim<_,'U> (# "sub" (convPrim<_,float> x) (convPrim<_,float> y) : float #) 
             elif type3eq<'T1, 'T2, 'U, float32> then convPrim<_,'U> (# "sub" (convPrim<_,float32> x) (convPrim<_,float32> y) : float32 #) 
@@ -2826,7 +2831,7 @@ namespace Microsoft.FSharp.Core
 
         type OpCheckedMultiplyInfo = class end
 
-        let CheckedMultiplyDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let CheckedMultiplyDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type3eq<'T1, 'T2, 'U, int32> then convPrim<_,'U> (# "mul.ovf" (convPrim<_,int32> x) (convPrim<_,int32> y) : int32 #) 
             elif type3eq<'T1, 'T2, 'U, float> then convPrim<_,'U> (# "mul" (convPrim<_,float> x) (convPrim<_,float> y) : float #) 
             elif type3eq<'T1, 'T2, 'U, float32> then convPrim<_,'U> (# "mul" (convPrim<_,float32> x) (convPrim<_,float32> y) : float32 #) 
@@ -2844,7 +2849,7 @@ namespace Microsoft.FSharp.Core
 
         type OpCheckedUnaryNegationInfo = class end
 
-        let CheckedUnaryNegationDynamic<'T,'U> value =
+        let CheckedUnaryNegationDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T,[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'U> value =
             if type2eq<'T, 'U, int32> then convPrim<_,'U> (# "sub.ovf" 0 (convPrim<_,int32> value) : int32 #) 
             elif type2eq<'T, 'U, float> then convPrim<_,'U> (# "neg" (convPrim<_,float> value) : float #) 
             elif type2eq<'T, 'U, float32> then convPrim<_,'U> (# "neg" (convPrim<_,float32> value) : float32 #) 
@@ -2857,7 +2862,7 @@ namespace Microsoft.FSharp.Core
 
         type OpLeftShiftInfo = class end
 
-        let LeftShiftDynamic<'T1, 'T2, 'U> (value: 'T1) (shift: 'T2) : 'U =
+        let LeftShiftDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (value: 'T1) (shift: 'T2) : 'U =
             if type2eq<'T1, 'U, sbyte> && typeeq<'T2, int> then convPrim<_,'U> (# "conv.i1" (# "shl" (convPrim<_,sbyte> value) (mask (convPrim<_,int32> shift) 7) : int32 #) : sbyte #)
             elif type2eq<'T1, 'U, byte> && typeeq<'T2, int> then convPrim<_,'U> (# "conv.u1" (# "shl" (convPrim<_,byte> value) (mask (convPrim<_,int32> shift) 7) : uint32 #) : byte #)
             elif type2eq<'T1, 'U, int16> && typeeq<'T2, int> then convPrim<_,'U> (# "conv.i2" (# "shl" (convPrim<_,int16> value) (mask (convPrim<_,int32> shift) 15) : int32 #) : int16 #)
@@ -2872,7 +2877,7 @@ namespace Microsoft.FSharp.Core
 
         type OpRightShiftInfo = class end
 
-        let RightShiftDynamic<'T1, 'T2, 'U> (value: 'T1) (shift: 'T2) : 'U =
+        let RightShiftDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (value: 'T1) (shift: 'T2) : 'U =
             if type2eq<'T1, 'U, sbyte> && typeeq<'T2, int> then convPrim<_,'U> (# "shr" (convPrim<_,sbyte> value) (mask (convPrim<_,int32> shift) 7) : sbyte #)
             elif type2eq<'T1, 'U, byte> && typeeq<'T2, int> then convPrim<_,'U> (# "shr.un" (convPrim<_,byte> value) (mask (convPrim<_,int32> shift) 7) : byte #)
             elif type2eq<'T1, 'U, int16> && typeeq<'T2, int> then convPrim<_,'U> (# "shr" (convPrim<_,int16> value) (mask (convPrim<_,int32> shift) 15): int16 #)
@@ -2887,7 +2892,7 @@ namespace Microsoft.FSharp.Core
 
         type OpBitwiseAndInfo = class end
 
-        let BitwiseAndDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let BitwiseAndDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type3eq<'T1, 'T2, 'U, sbyte> then convPrim<_,'U> (# "and" (convPrim<_,sbyte> x) (convPrim<_,sbyte> y) : sbyte #)
             elif type3eq<'T1, 'T2, 'U, byte> then convPrim<_,'U> (# "and" (convPrim<_,byte> x) (convPrim<_,byte> y) : byte #)
             elif type3eq<'T1, 'T2, 'U, int16> then convPrim<_,'U> (# "and" (convPrim<_,int16> x) (convPrim<_,int16> y) : int16 #)
@@ -2902,7 +2907,7 @@ namespace Microsoft.FSharp.Core
 
         type OpBitwiseOrInfo = class end
 
-        let BitwiseOrDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let BitwiseOrDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type3eq<'T1, 'T2, 'U, sbyte> then convPrim<_,'U> (# "or" (convPrim<_,sbyte> x) (convPrim<_,sbyte> y) : sbyte #)
             elif type3eq<'T1, 'T2, 'U, byte> then convPrim<_,'U> (# "or" (convPrim<_,byte> x) (convPrim<_,byte> y) : byte #)
             elif type3eq<'T1, 'T2, 'U, int16> then convPrim<_,'U> (# "or" (convPrim<_,int16> x) (convPrim<_,int16> y) : int16 #)
@@ -2917,7 +2922,7 @@ namespace Microsoft.FSharp.Core
 
         type OpExclusiveOrInfo = class end
 
-        let ExclusiveOrDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let ExclusiveOrDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type3eq<'T1, 'T2, 'U, sbyte> then convPrim<_,'U> (# "xor" (convPrim<_,sbyte> x) (convPrim<_,sbyte> y) : sbyte #)
             elif type3eq<'T1, 'T2, 'U, byte> then convPrim<_,'U> (# "xor" (convPrim<_,byte> x) (convPrim<_,byte> y) : byte #)
             elif type3eq<'T1, 'T2, 'U, int16> then convPrim<_,'U> (# "xor" (convPrim<_,int16> x) (convPrim<_,int16> y) : int16 #)
@@ -2932,7 +2937,7 @@ namespace Microsoft.FSharp.Core
 
         type OpLogicalNotInfo = class end
 
-        let LogicalNotDynamic<'T,'U> (value: 'T) : 'U =
+        let LogicalNotDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T,[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'U> (value: 'T) : 'U =
             if type2eq<'T, 'U, sbyte> then convPrim<_,'U> (# "conv.i1" (# "not" (convPrim<_,sbyte> value) : int32 #) : sbyte #)
             elif type2eq<'T, 'U, byte> then convPrim<_,'U> (# "conv.u1" (# "not" (convPrim<_,byte> value) : uint32 #) : byte #)
             elif type2eq<'T, 'U, int16> then convPrim<_,'U> (# "conv.i2" (# "not" (convPrim<_,int16> value) : int32 #) : int16 #)
@@ -2947,7 +2952,7 @@ namespace Microsoft.FSharp.Core
 
         type OpExplicitInfo = class end
 
-        let ExplicitDynamic<'T, 'U> (value: 'T) : 'U =
+        let ExplicitDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'U> (value: 'T) : 'U =
             if typeeq<'U, byte> then 
                 if typeeq<'T, sbyte> then convPrim<_,'U> (# "conv.u1" (convPrim<_,sbyte> value) : byte #)
                 elif typeeq<'T, byte> then convPrim<_,'U> value
@@ -3182,7 +3187,7 @@ namespace Microsoft.FSharp.Core
             else
                 UnaryOpDynamicImplTable<OpExplicitInfo, 'T, 'U>.Invoke "op_Explicit" value
 
-        let CheckedExplicitDynamic<'T, 'U> (value: 'T) : 'U =
+        let CheckedExplicitDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'U> (value: 'T) : 'U =
             if typeeq<'U, byte> then
                 if typeeq<'T, sbyte> then convPrim<_,'U> (# "conv.ovf.u1" (convPrim<_,sbyte> value) : byte #)
                 elif typeeq<'T, byte> then convPrim<_,'U> value
@@ -3417,7 +3422,7 @@ namespace Microsoft.FSharp.Core
 
         type OpLessThanInfo = class end
 
-        let LessThanDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let LessThanDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type2eq<'T1, 'T2, sbyte> && typeeq<'U, bool> then convPrim<_,'U> (# "clt" (convPrim<_,sbyte> x) (convPrim<_,sbyte> y) : bool #)
             elif type2eq<'T1, 'T2, byte> && typeeq<'U, bool> then convPrim<_,'U> (# "clt.un" (convPrim<_,byte> x) (convPrim<_,byte> y) : bool #)
             elif type2eq<'T1, 'T2, int16> && typeeq<'U, bool> then convPrim<_,'U> (# "clt" (convPrim<_,int16> x) (convPrim<_,int16> y) : bool #)
@@ -3437,7 +3442,7 @@ namespace Microsoft.FSharp.Core
 
         type OpGreaterThanInfo = class end
 
-        let GreaterThanDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let GreaterThanDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type2eq<'T1, 'T2, sbyte> && typeeq<'U, bool> then convPrim<_,'U> (# "cgt" (convPrim<_,sbyte> x) (convPrim<_,sbyte> y) : bool #)
             elif type2eq<'T1, 'T2, byte> && typeeq<'U, bool> then convPrim<_,'U> (# "cgt.un" (convPrim<_,byte> x) (convPrim<_,byte> y) : bool #)
             elif type2eq<'T1, 'T2, int16> && typeeq<'U, bool> then convPrim<_,'U> (# "cgt" (convPrim<_,int16> x) (convPrim<_,int16> y) : bool #)
@@ -3457,7 +3462,7 @@ namespace Microsoft.FSharp.Core
 
         type OpLessThanOrEqualInfo = class end
 
-        let LessThanOrEqualDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let LessThanOrEqualDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type2eq<'T1, 'T2, sbyte> && typeeq<'U, bool> then convPrim<_,'U> (not (# "cgt" (convPrim<_,sbyte> x) (convPrim<_,sbyte> y) : bool #))
             elif type2eq<'T1, 'T2, byte> && typeeq<'U, bool> then convPrim<_,'U> (not (# "cgt.un" (convPrim<_,byte> x) (convPrim<_,byte> y) : bool #))
             elif type2eq<'T1, 'T2, int16> && typeeq<'U, bool> then convPrim<_,'U> (not (# "cgt" (convPrim<_,int16> x) (convPrim<_,int16> y) : bool #))
@@ -3477,7 +3482,7 @@ namespace Microsoft.FSharp.Core
 
         type OpGreaterThanOrEqualInfo = class end
 
-        let GreaterThanOrEqualDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let GreaterThanOrEqualDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type2eq<'T1, 'T2, sbyte> && typeeq<'U, bool> then convPrim<_,'U> (not (# "clt" (convPrim<_,sbyte> x) (convPrim<_,sbyte> y) : bool #))
             elif type2eq<'T1, 'T2, byte> && typeeq<'U, bool> then convPrim<_,'U> (not (# "clt.un" (convPrim<_,byte> x) (convPrim<_,byte> y) : bool #))
             elif type2eq<'T1, 'T2, int16> && typeeq<'U, bool> then convPrim<_,'U> (not (# "clt" (convPrim<_,int16> x) (convPrim<_,int16> y) : bool #))
@@ -3497,7 +3502,7 @@ namespace Microsoft.FSharp.Core
 
         type OpEqualityInfo = class end
 
-        let EqualityDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let EqualityDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type2eq<'T1, 'T2, sbyte> && typeeq<'U, bool> then convPrim<_,'U> (# "ceq" (convPrim<_,sbyte> x) (convPrim<_,sbyte> y) : bool #)
             elif type2eq<'T1, 'T2, byte> && typeeq<'U, bool> then convPrim<_,'U> (# "ceq" (convPrim<_,byte> x) (convPrim<_,byte> y) : bool #)
             elif type2eq<'T1, 'T2, int16> && typeeq<'U, bool> then convPrim<_,'U> (# "ceq" (convPrim<_,int16> x) (convPrim<_,int16> y) : bool #)
@@ -3517,7 +3522,7 @@ namespace Microsoft.FSharp.Core
 
         type OpInequalityInfo = class end
 
-        let InequalityDynamic<'T1, 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
+        let InequalityDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T1, [<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T2, 'U> (x: 'T1) (y: 'T2) : 'U =
             if type2eq<'T1, 'T2, sbyte> && typeeq<'U, bool> then convPrim<_,'U> (not (# "ceq" (convPrim<_,sbyte> x) (convPrim<_,sbyte> y) : bool #))
             elif type2eq<'T1, 'T2, byte> && typeeq<'U, bool> then convPrim<_,'U> (not (# "ceq" (convPrim<_,byte> x) (convPrim<_,byte> y) : bool #))
             elif type2eq<'T1, 'T2, int16> && typeeq<'U, bool> then convPrim<_,'U> (not (# "ceq" (convPrim<_,int16> x) (convPrim<_,int16> y) : bool #))
@@ -3537,13 +3542,13 @@ namespace Microsoft.FSharp.Core
 
         type DivideByIntInfo = class end
 
-        let DivideByIntDynamic<'T> (x: 'T) (n: int) : 'T =
+        let DivideByIntDynamic<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'T> (x: 'T) (n: int) : 'T =
             if typeeq<'T, float> then convPrim<_,'T> (# "div" (convPrim<_,float> x) (# "conv.r8" n : float #) : float #)
             elif typeeq<'T, float32> then convPrim<_,'T> (# "div" (convPrim<_,float32> x) (# "conv.r4" n : float32 #) : float32 #) 
             elif typeeq<'T, decimal> then convPrim<_,'T> (Decimal.Divide(convPrim<_,decimal> x, Convert.ToDecimal(n))) 
             else BinaryOpDynamicImplTable<DivideByIntInfo, 'T, int, 'T>.Invoke "DivideByInt" x n
 
-        let inline DivideByInt< ^T when ^T : (static member DivideByInt : ^T * int -> ^T) > (x: ^T) (y: int) : ^T =
+        let inline DivideByInt<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] ^T when ^T : (static member DivideByInt : ^T * int -> ^T) > (x: ^T) (y: int) : ^T =
             DivideByIntDynamic<'T> x y
             when ^T : float = (# "div" x ((# "conv.r8" y  : float #)) : float #)
             when ^T : float32 = (# "div" x ((# "conv.r4" y  : float32 #)) : float32 #)
@@ -4193,7 +4198,6 @@ namespace Microsoft.FSharp.Collections
 namespace Microsoft.FSharp.Core
 
     open System
-    open System.Diagnostics              
     open System.Collections.Generic
     open System.Globalization
     open System.Text
@@ -7016,12 +7020,12 @@ namespace Microsoft.FSharp.Control
 
     open System    
     open System.Threading    
-    open System.Diagnostics
+    open System.Diagnostics.CodeAnalysis
     open Microsoft.FSharp.Core
     open Microsoft.FSharp.Core.Operators
 
     module LazyExtensions = 
-        type System.Lazy<'T> with
+        type System.Lazy<[<DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)>] 'T> with
             [<CompiledName("Create")>] // give the extension member a 'nice', unmangled compiled name, unique within this module
             static member Create(creator : unit -> 'T) : Lazy<'T> =
                 let creator = Func<'T>(creator)

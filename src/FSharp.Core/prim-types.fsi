@@ -5986,6 +5986,10 @@ namespace System.Diagnostics.CodeAnalysis
         member Uri: String with get, set
 #endif
 
+    module internal DynamicallyAccessed =
+        [<Microsoft.FSharp.Core.Literal>]
+        val AllMethods: DynamicallyAccessedMemberTypes = DynamicallyAccessedMemberTypes.PublicMethods ||| DynamicallyAccessedMemberTypes.NonPublicMethods 
+
 namespace Microsoft.FSharp.Control
 
     open Microsoft.FSharp.Core
