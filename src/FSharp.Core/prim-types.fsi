@@ -5988,7 +5988,20 @@ namespace System.Diagnostics.CodeAnalysis
 
     module internal DynamicallyAccessed =
         [<Microsoft.FSharp.Core.Literal>]
-        val AllMethods: DynamicallyAccessedMemberTypes = DynamicallyAccessedMemberTypes.PublicMethods ||| DynamicallyAccessedMemberTypes.NonPublicMethods 
+        val AllConstructors: DynamicallyAccessedMemberTypes = DynamicallyAccessedMemberTypes.PublicConstructors ||| DynamicallyAccessedMemberTypes.NonPublicConstructors
+        [<Microsoft.FSharp.Core.Literal>]
+        val AllFields: DynamicallyAccessedMemberTypes = DynamicallyAccessedMemberTypes.PublicFields ||| DynamicallyAccessedMemberTypes.NonPublicFields
+        [<Microsoft.FSharp.Core.Literal>]
+        val AllMethods: DynamicallyAccessedMemberTypes = DynamicallyAccessedMemberTypes.PublicMethods ||| DynamicallyAccessedMemberTypes.NonPublicMethods
+        [<Microsoft.FSharp.Core.Literal>]
+        val AllNestedTypes: DynamicallyAccessedMemberTypes = DynamicallyAccessedMemberTypes.PublicNestedTypes ||| DynamicallyAccessedMemberTypes.NonPublicNestedTypes
+        [<Microsoft.FSharp.Core.Literal>]
+        val AllProperties: DynamicallyAccessedMemberTypes = DynamicallyAccessedMemberTypes.PublicProperties ||| DynamicallyAccessedMemberTypes.NonPublicProperties
+        [<Microsoft.FSharp.Core.Literal>]
+        val AllPropertiesFieldsConstructors: DynamicallyAccessedMemberTypes =
+            DynamicallyAccessedMemberTypes.PublicProperties ||| DynamicallyAccessedMemberTypes.NonPublicProperties
+            ||| DynamicallyAccessedMemberTypes.PublicFields ||| DynamicallyAccessedMemberTypes.NonPublicFields
+            ||| DynamicallyAccessedMemberTypes.PublicConstructors ||| DynamicallyAccessedMemberTypes.NonPublicConstructors
 
 namespace Microsoft.FSharp.Control
 

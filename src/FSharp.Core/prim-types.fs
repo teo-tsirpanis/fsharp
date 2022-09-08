@@ -429,7 +429,20 @@ namespace System.Diagnostics.CodeAnalysis
     // Common DynamicallyAccessedMemberTypes combinations.
     module internal DynamicallyAccessed =
         [<Microsoft.FSharp.Core.Literal>]
+        let AllConstructors = DynamicallyAccessedMemberTypes.PublicConstructors ||| DynamicallyAccessedMemberTypes.NonPublicConstructors
+        [<Microsoft.FSharp.Core.Literal>]
+        let AllFields = DynamicallyAccessedMemberTypes.PublicFields ||| DynamicallyAccessedMemberTypes.NonPublicFields
+        [<Microsoft.FSharp.Core.Literal>]
         let AllMethods = DynamicallyAccessedMemberTypes.PublicMethods ||| DynamicallyAccessedMemberTypes.NonPublicMethods
+        [<Microsoft.FSharp.Core.Literal>]
+        let AllNestedTypes = DynamicallyAccessedMemberTypes.PublicNestedTypes ||| DynamicallyAccessedMemberTypes.NonPublicNestedTypes
+        [<Microsoft.FSharp.Core.Literal>]
+        let AllProperties = DynamicallyAccessedMemberTypes.PublicProperties ||| DynamicallyAccessedMemberTypes.NonPublicProperties
+        [<Microsoft.FSharp.Core.Literal>]
+        let AllPropertiesFieldsConstructors =
+            DynamicallyAccessedMemberTypes.PublicProperties ||| DynamicallyAccessedMemberTypes.NonPublicProperties
+            ||| DynamicallyAccessedMemberTypes.PublicFields ||| DynamicallyAccessedMemberTypes.NonPublicFields
+            ||| DynamicallyAccessedMemberTypes.PublicConstructors ||| DynamicallyAccessedMemberTypes.NonPublicConstructors
 
 namespace Microsoft.FSharp.Core
 

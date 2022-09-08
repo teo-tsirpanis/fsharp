@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation.  All Rights Reserved.  See License.txt in the project root for license information.
+// Copyright (c) Microsoft Corporation.  All Rights Reserved.  See License.txt in the project root for license information.
 
 // Reflection on F# values. Analyze an object to see if it the representation
 // of an F# value.
@@ -7,6 +7,7 @@ namespace Microsoft.FSharp.Reflection
 
 open System
 open System.Collections.Generic
+open System.Diagnostics.CodeAnalysis
 open System.Reflection
 open Microsoft.FSharp.Core
 open Microsoft.FSharp.Core.Operators
@@ -66,13 +67,30 @@ module internal Impl =
     let staticFieldFlags = BindingFlags.GetField ||| BindingFlags.Static
     let staticMethodFlags = BindingFlags.Static
 
-    let getInstancePropertyInfo (typ: Type, propName, bindingFlags) =
+    let exprUnreferencedCode = ""
+
+    let getInstancePropertyInfo
+        (
+            [<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties)>] typ: Type,
+            propName,
+            bindingFlags
+        ) =
         typ.GetProperty(propName, instancePropertyFlags ||| bindingFlags)
 
-    let getInstancePropertyInfos (typ, names, bindingFlags) =
+    let getInstancePropertyInfos
+        (
+            [<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties)>] typ,
+            names,
+            bindingFlags
+        ) =
         names |> Array.map (fun nm -> getInstancePropertyInfo (typ, nm, bindingFlags))
 
-    let getInstancePropertyReader (typ: Type, propName, bindingFlags) =
+    let getInstancePropertyReader
+        (
+            [<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties)>] typ: Type,
+            propName,
+            bindingFlags
+        ) =
         match getInstancePropertyInfo (typ, propName, bindingFlags) with
         | null -> None
         | prop -> Some(fun (obj: obj) -> prop.GetValue(obj, instancePropertyFlags ||| bindingFlags, null, null, null))
@@ -81,15 +99,7 @@ module internal Impl =
     // EXPRESSION TREE COMPILATION
 
     let compilePropGetterFunc (prop: PropertyInfo) =
-        let param = Expression.Parameter(typeof<obj>, "param")
-
-        let propExpr =
-            Expression.Property(Expression.Convert(param, prop.DeclaringType), prop)
-
-        let expr =
-            Expression.Lambda<Func<obj, obj>>(Expression.Convert(propExpr, typeof<obj>), param)
-
-        expr.Compile()
+        prop.GetMethod.CreateDelegate(typeof<Func<obj, obj>>) :?> Func<obj, obj>
 
     let compileRecordOrUnionCaseReaderFunc (typ, props: PropertyInfo[]) =
         let param = Expression.Parameter(typeof<obj>, "param")
@@ -385,7 +395,7 @@ module internal Impl =
         typ
 #endif
 
-    let getUnionTypeTagNameMap (typ: Type, bindingFlags) =
+    let getUnionTypeTagNameMap ([<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods ||| DynamicallyAccessed.AllNestedTypes ||| DynamicallyAccessed.AllFields)>]typ: Type, bindingFlags) =
         let enumTyp = typ.GetNestedType("Tags", bindingFlags)
         // Unions with a singleton case do not get a Tags type (since there is only one tag), hence enumTyp may be null in this case
         match enumTyp with
@@ -688,26 +698,49 @@ module internal Impl =
     let dictionaryLock = obj ()
     let refTupleTypes = Dictionary<Assembly, Type[]>()
     let valueTupleTypes = Dictionary<Assembly, Type[]>()
+    
+    [<RequiresDynamicCode("The native code for the tuple instantiation might not be available at runtime.")>]
+    [<UnconditionalSuppressMessage("ReflectionAnalysis", "IL2026:RequiresUnreferencedCode", Justification = "Tuples' generics don't have any constraints.")>]
+    [<UnconditionalSuppressMessage("ReflectionAnalysis", "IL2055:UnrecognizedReflectionPattern", Justification = "All involved types are present.")>]
+    let rec mkRuntimeTupleType isStruct (tys: Type[]) =
+        let getType n =
+            if isStruct then
+                match n with
+                | 1 -> typedefof<ValueTuple<_>>
+                | 2 -> typedefof<ValueTuple<_, _>>
+                | 3 -> typedefof<ValueTuple<_, _, _>>
+                | 4 -> typedefof<ValueTuple<_, _, _, _>>
+                | 5 -> typedefof<ValueTuple<_, _, _, _, _>>
+                | 6 -> typedefof<ValueTuple<_, _, _, _, _, _>>
+                | 7 -> typedefof<ValueTuple<_, _, _, _, _, _, _>>
+                | _ -> invalidArg "tys" (SR.GetString(SR.invalidTupleTypes))
+            else
+                match n with
+                | 1 -> typedefof<Tuple<_>>
+                | 2 -> typedefof<Tuple<_, _>>
+                | 3 -> typedefof<Tuple<_, _, _>>
+                | 4 -> typedefof<Tuple<_, _, _, _>>
+                | 5 -> typedefof<Tuple<_, _, _, _, _>>
+                | 6 -> typedefof<Tuple<_, _, _, _, _, _>>
+                | 7 -> typedefof<Tuple<_, _, _, _, _, _, _>>
+                | _ -> invalidArg "tys" (SR.GetString(SR.invalidTupleTypes))
+        if tys.Length < maxTuple then
+            (getType tys.Length).MakeGenericType(tys)
+        else
+            let tysA = tys.[0 .. tupleEncField - 1]
+            let tysB = tys.[maxTuple - 1 ..]
+            let tyB = mkRuntimeTupleType isStruct tysB
+            let extendedTupleType =
+                if isStruct then
+                    typedefof<ValueTuple<_, _, _, _, _, _, _, _>>
+                else
+                    typedefof<Tuple<_, _, _, _, _, _, _, _>>
+            extendedTupleType.MakeGenericType(Array.append tysA [| tyB |])
 
+    [<RequiresDynamicCode("The tuple instantiation code might not be available at runtime.")>]
+    [<RequiresUnreferencedCode("The tuple type might not have been preserved in the assembly.")>]
     let rec mkTupleType isStruct (asm: Assembly) (tys: Type[]) =
         let table =
-            let makeIt n =
-                let tupleFullName n =
-                    let structOffset = if isStruct then 9 else 0
-                    let index = n - 1 + structOffset
-                    tupleNames.[index]
-
-                match n with
-                | 1 -> asm.GetType(tupleFullName 1)
-                | 2 -> asm.GetType(tupleFullName 2)
-                | 3 -> asm.GetType(tupleFullName 3)
-                | 4 -> asm.GetType(tupleFullName 4)
-                | 5 -> asm.GetType(tupleFullName 5)
-                | 6 -> asm.GetType(tupleFullName 6)
-                | 7 -> asm.GetType(tupleFullName 7)
-                | 8 -> asm.GetType(tupleFullName 8)
-                | _ -> invalidArg "tys" (SR.GetString(SR.invalidTupleTypes))
-
             let tables =
                 if isStruct then
                     valueTupleTypes
@@ -718,7 +751,11 @@ module internal Impl =
             | false, _ ->
                 // the Dictionary<>s here could be ConcurrentDictionary<>'s, but then
                 // that would lock while initializing the Type array (maybe not an issue)
-                let mutable a = Array.init<Type> 8 (fun i -> makeIt (i + 1))
+                let mutable a = Array.init<Type> 8 (fun i ->
+                    let structOffset = if isStruct then 9 else 0
+                    let index = i + structOffset
+                    let tupleFullName = tupleNames[index]
+                    asm.GetType tupleFullName)
 
                 lock dictionaryLock (fun () ->
                     match tables.TryGetValue asm with
@@ -823,7 +860,7 @@ module internal Impl =
 #endif
         fields
 
-    let getTupleConstructorMethod (typ: Type) =
+    let getTupleConstructorMethod ([<DynamicallyAccessedMembers(DynamicallyAccessed.AllPropertiesFieldsConstructors)>] typ: Type) =
         let ctor =
             if typ.IsValueType then
                 let fields =
@@ -853,13 +890,13 @@ module internal Impl =
 
         ctor
 
-    let getTupleCtor (typ: Type) =
+    let getTupleCtor ([<DynamicallyAccessedMembers(DynamicallyAccessed.AllPropertiesFieldsConstructors)>] typ: Type) =
         let ctor = getTupleConstructorMethod typ
 
         (fun (args: obj[]) ->
             ctor.Invoke(BindingFlags.InvokeMethod ||| BindingFlags.Instance ||| BindingFlags.Public, null, args, null))
 
-    let getTupleElementAccessors (typ: Type) =
+    let getTupleElementAccessors ([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties ||| DynamicallyAccessed.AllFields)>] typ: Type) =
         if typ.IsValueType then
             Choice1Of2(typ.GetFields(instanceFieldFlags ||| BindingFlags.Public) |> orderTupleFields)
         else
@@ -868,7 +905,7 @@ module internal Impl =
                 |> orderTupleProperties
             )
 
-    let rec getTupleReader (typ: Type) =
+    let rec getTupleReader ([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties ||| DynamicallyAccessed.AllFields)>] typ: Type) =
         let etys = typ.GetGenericArguments()
         // Get the reader for the outer tuple record
         let reader =
@@ -887,7 +924,7 @@ module internal Impl =
                 let encVals = reader2 directVals.[tupleEncField]
                 Array.append directVals.[0 .. tupleEncField - 1] encVals)
 
-    let rec getTupleConstructor (typ: Type) =
+    let rec getTupleConstructor ([<DynamicallyAccessedMembers(DynamicallyAccessed.AllPropertiesFieldsConstructors)>] typ: Type) =
         let etys = typ.GetGenericArguments()
         let maker1 = getTupleCtor typ
 
@@ -901,7 +938,7 @@ module internal Impl =
                 let encVal = maker2 args.[tupleEncField..]
                 maker1 (Array.append args.[0 .. tupleEncField - 1] [| encVal |]))
 
-    let getTupleConstructorInfo (typ: Type) =
+    let getTupleConstructorInfo ([<DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)>] typ: Type) =
         let etys = typ.GetGenericArguments()
         let maker1 = getTupleConstructorMethod typ
 
@@ -910,17 +947,10 @@ module internal Impl =
         else
             maker1, Some(etys.[tupleEncField])
 
-    let getTupleReaderInfo (typ: Type, index: int) =
-        if index < 0 then
-            let msg =
-                String.Format(SR.GetString(SR.tupleIndexOutOfRange), typ.FullName, index.ToString())
-
-            invalidArg "index" msg
-
-        let get index =
-            if typ.IsValueType then
-                let props =
-                    typ.GetProperties(instancePropertyFlags ||| BindingFlags.Public)
+    let private getTupleReaderInfoImpl ([<DynamicallyAccessedMembers(DynamicallyAccessed.AllPropertiesFieldsConstructors)>] typ: Type) index =
+        if typ.IsValueType then
+            let props =
+                typ.GetProperties(instancePropertyFlags ||| BindingFlags.Public)
                     |> orderTupleProperties
 
                 if index >= props.Length then
@@ -941,13 +971,20 @@ module internal Impl =
 
                     invalidArg "index" msg
 
-                props.[index]
+            props.[index]
+
+    let getTupleReaderInfo ([<DynamicallyAccessedMembers(DynamicallyAccessed.AllPropertiesFieldsConstructors)>] typ: Type, index: int) =
+        if index < 0 then
+            let msg =
+                String.Format(SR.GetString(SR.tupleIndexOutOfRange), typ.FullName, index.ToString())
+
+            invalidArg "index" msg
 
         if index < tupleEncField then
-            get index, None
+            getTupleReaderInfoImpl typ index, None
         else
             let etys = typ.GetGenericArguments()
-            get tupleEncField, Some(etys.[tupleEncField], index - (maxTuple - 1))
+            getTupleReaderInfoImpl typ tupleEncField, Some(etys.[tupleEncField], index - (maxTuple - 1))
 
     let getFunctionTypeInfo (typ: Type) =
         if not (isFunctionType typ) then
@@ -979,20 +1016,20 @@ module internal Impl =
              else
                  true)
 
-    let fieldPropsOfRecordType (typ: Type, bindingFlags) =
+    let fieldPropsOfRecordType ([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties)>] typ: Type, bindingFlags) =
         typ.GetProperties(instancePropertyFlags ||| bindingFlags)
         |> Array.filter isFieldProperty
         |> sortFreshArray (fun p1 p2 -> compare (sequenceNumberOfMember p1) (sequenceNumberOfMember p2))
 
-    let getRecordReader (typ: Type, bindingFlags) =
+    let getRecordReader ([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties)>] typ: Type, bindingFlags) =
         let props = fieldPropsOfRecordType (typ, bindingFlags)
         (fun (obj: obj) -> props |> Array.map (fun prop -> prop.GetValue(obj, null)))
 
-    let getRecordReaderCompiled (typ: Type, bindingFlags) =
+    let getRecordReaderCompiled ([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties)>] typ: Type, bindingFlags) =
         let props = fieldPropsOfRecordType (typ, bindingFlags)
         compileRecordOrUnionCaseReaderFunc(typ, props).Invoke
 
-    let getRecordConstructorMethod (typ: Type, bindingFlags) =
+    let getRecordConstructorMethod ([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties ||| DynamicallyAccessed.AllConstructors)>] typ: Type, bindingFlags) =
         let props = fieldPropsOfRecordType (typ, bindingFlags)
 
         let ctor =
@@ -1013,13 +1050,13 @@ module internal Impl =
 
         ctor
 
-    let getRecordConstructor (typ: Type, bindingFlags) =
+    let getRecordConstructor ([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties ||| DynamicallyAccessed.AllConstructors)>] typ: Type, bindingFlags) =
         let ctor = getRecordConstructorMethod (typ, bindingFlags)
 
         (fun (args: obj[]) ->
             ctor.Invoke(BindingFlags.InvokeMethod ||| BindingFlags.Instance ||| bindingFlags, null, args, null))
 
-    let getRecordConstructorCompiled (typ: Type, bindingFlags) =
+    let getRecordConstructorCompiled ([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties ||| DynamicallyAccessed.AllConstructors)>] typ: Type, bindingFlags) =
         let ctor = getRecordConstructorMethod (typ, bindingFlags)
         compileRecordConstructorFunc(ctor).Invoke
 
@@ -1161,49 +1198,39 @@ type FSharpType =
         checkNonNull "typ" typ
         isModuleType typ
 
+    [<RequiresDynamicCode("The native code for the function instantiation might not be available at runtime.")>]
+    [<UnconditionalSuppressMessage("ReflectionAnalysis", "IL2026:RequiresUnreferencedCode", Justification = "Functions' generics don't have any constraints.")>]
+    [<UnconditionalSuppressMessage("ReflectionAnalysis", "IL2055:UnrecognizedReflectionPattern", Justification = "All involved types are present.")>]
     static member MakeFunctionType(domain: Type, range: Type) =
         checkNonNull "domain" domain
         checkNonNull "range" range
         func.MakeGenericType [| domain; range |]
 
+    [<RequiresDynamicCode("The native code for the tuple instantiation might not be available at runtime.")>]
     static member MakeTupleType(types: Type[]) =
         checkNonNull "types" types
 
-        // No assembly passed therefore just get framework local version of Tuple
-        let asm = typeof<System.Tuple>.Assembly
-
-        if
-            types
-            |> Array.exists (function
-                | null -> true
-                | _ -> false)
-        then
+        if Array.contains null types then
             invalidArg "types" (SR.GetString(SR.nullsNotAllowedInArray))
 
-        mkTupleType false asm types
+        mkRuntimeTupleType false types
 
+    [<RequiresDynamicCode("The native code for the tuple instantiation might not be available at runtime.")>]
+    [<RequiresUnreferencedCode("The tuple type might not have been preserved in the assembly. Instead use an overload that does not accept an Assembly.")>]
     static member MakeTupleType(asm: Assembly, types: Type[]) =
         checkNonNull "types" types
 
-        if
-            types
-            |> Array.exists (function
-                | null -> true
-                | _ -> false)
-        then
+        if Array.contains null types then
             invalidArg "types" (SR.GetString(SR.nullsNotAllowedInArray))
 
         mkTupleType false asm types
 
+    [<RequiresDynamicCode("The native code for the tuple instantiation might not be available at runtime.")>]
+    [<RequiresUnreferencedCode("The tuple type might not have been preserved in the assembly.")>]
     static member MakeStructTupleType(asm: Assembly, types: Type[]) =
         checkNonNull "types" types
 
-        if
-            types
-            |> Array.exists (function
-                | null -> true
-                | _ -> false)
-        then
+        if Array.contains null types then
             invalidArg "types" (SR.GetString(SR.nullsNotAllowedInArray))
 
         mkTupleType true asm types
@@ -1220,12 +1247,12 @@ type FSharpType =
 
         getFunctionTypeInfo functionType
 
-    static member GetRecordFields(recordType: Type, ?bindingFlags) =
+    static member GetRecordFields([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties)>] recordType: Type, ?bindingFlags) =
         let bindingFlags = defaultArg bindingFlags BindingFlags.Public
         checkRecordType ("recordType", recordType, bindingFlags)
         fieldPropsOfRecordType (recordType, bindingFlags)
 
-    static member GetUnionCases(unionType: Type, ?bindingFlags) =
+    static member GetUnionCases([<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethodsFieldsNestedTypes)>] unionType: Type, ?bindingFlags) =
         let bindingFlags = defaultArg bindingFlags BindingFlags.Public
         checkNonNull "unionType" unionType
         let unionType = getTypeOfReprType (unionType, bindingFlags)
@@ -1239,7 +1266,7 @@ type FSharpType =
         checkNonNull "exceptionType" exceptionType
         isExceptionRepr (exceptionType, bindingFlags)
 
-    static member GetExceptionFields(exceptionType: Type, ?bindingFlags) =
+    static member GetExceptionFields([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties)>] exceptionType: Type, ?bindingFlags) =
         let bindingFlags = defaultArg bindingFlags BindingFlags.Public
         checkNonNull "exceptionType" exceptionType
         checkExnType (exceptionType, bindingFlags)
@@ -1269,7 +1296,7 @@ type FSharpValue =
 
         info.GetValue(record, null)
 
-    static member GetRecordFields(record: obj, ?bindingFlags) =
+    static member GetRecordFields([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties)>] record: obj, ?bindingFlags) =
         let bindingFlags = defaultArg bindingFlags BindingFlags.Public
         checkNonNull "record" record
         let typ = record.GetType()
@@ -1283,17 +1310,17 @@ type FSharpValue =
         checkNonNull "info" info
         compilePropGetterFunc(info).Invoke
 
-    static member PreComputeRecordReader(recordType: Type, ?bindingFlags) : (obj -> obj[]) =
+    static member PreComputeRecordReader([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties)>] recordType: Type, ?bindingFlags) : (obj -> obj[]) =
         let bindingFlags = defaultArg bindingFlags BindingFlags.Public
         checkRecordType ("recordType", recordType, bindingFlags)
         getRecordReaderCompiled (recordType, bindingFlags)
 
-    static member PreComputeRecordConstructor(recordType: Type, ?bindingFlags) =
+    static member PreComputeRecordConstructor([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties ||| DynamicallyAccessed.AllConstructors)>] recordType: Type, ?bindingFlags) =
         let bindingFlags = defaultArg bindingFlags BindingFlags.Public
         checkRecordType ("recordType", recordType, bindingFlags)
         getRecordConstructorCompiled (recordType, bindingFlags)
 
-    static member PreComputeRecordConstructorInfo(recordType: Type, ?bindingFlags) =
+    static member PreComputeRecordConstructorInfo([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties ||| DynamicallyAccessed.AllConstructors)>] recordType: Type, ?bindingFlags) =
         let bindingFlags = defaultArg bindingFlags BindingFlags.Public
         checkRecordType ("recordType", recordType, bindingFlags)
         getRecordConstructorMethod (recordType, bindingFlags)
@@ -1350,7 +1377,7 @@ type FSharpValue =
         checkTupleType ("tupleType", tupleType)
         (compileTupleReader tupleEncField getTupleElementAccessors tupleType).Invoke
 
-    static member PreComputeTuplePropertyInfo(tupleType: Type, index: int) =
+    static member PreComputeTuplePropertyInfo([<DynamicallyAccessedMembers(DynamicallyAccessed.AllPropertiesFieldsConstructors)>] tupleType: Type, index: int) =
         checkTupleType ("tupleType", tupleType)
         getTupleReaderInfo (tupleType, index)
 
@@ -1420,7 +1447,7 @@ type FSharpValue =
         let typ = unionCase.DeclaringType
         getUnionCaseRecordReaderCompiled (typ, unionCase.Tag, bindingFlags)
 
-    static member GetExceptionFields(exn: obj, ?bindingFlags) =
+    static member GetExceptionFields([<DynamicallyAccessedMembers(DynamicallyAccessed.AllProperties)>] exn: obj, ?bindingFlags) =
         let bindingFlags = defaultArg bindingFlags BindingFlags.Public
         checkNonNull "exn" exn
         let typ = exn.GetType()
@@ -1439,7 +1466,7 @@ module FSharpReflectionExtensions =
             let bindingFlags = getBindingFlags allowAccessToPrivateRepresentation
             FSharpType.IsExceptionRepresentation(exceptionType, bindingFlags)
 
-        static member GetUnionCases(unionType: Type, ?allowAccessToPrivateRepresentation) =
+        static member GetUnionCases([<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethodsFieldsNestedTypes)>] unionType: Type, ?allowAccessToPrivateRepresentation) =
             let bindingFlags = getBindingFlags allowAccessToPrivateRepresentation
             FSharpType.GetUnionCases(unionType, bindingFlags)
 
