@@ -9,7 +9,7 @@ open Microsoft.FSharp.Core.Operators
 open Microsoft.FSharp.Collections
 open Microsoft.FSharp.Control
 open System
-open System.Diagnostics
+open System.Diagnostics.CodeAnalysis
 open System.Reflection
 
 module private Atomic =
@@ -80,7 +80,9 @@ type EventDelegee<'Args>(observer: System.IObserver<'Args>) =
 type EventWrapper<'Delegate, 'Args> = delegate of 'Delegate * obj * 'Args -> unit
 
 [<CompiledName("FSharpEvent`2")>]
-type Event<'Delegate, 'Args
+[<RequiresUnreferencedCode("F# events are not compatible with trimming.")>]
+[<RequiresDynamicCode("F# events do not work on platforms without dynamic code generation.")>]
+type Event<[<DynamicallyAccessedMembers(DynamicallyAccessed.AllMethods)>] 'Delegate, 'Args
     when 'Delegate: delegate<'Args, unit> and 'Delegate :> System.Delegate and 'Delegate: not struct>() =
 
     let mutable multicast: 'Delegate = Unchecked.defaultof<_>
