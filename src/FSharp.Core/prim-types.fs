@@ -13,12 +13,7 @@
 namespace Microsoft.FSharp.Core
 
     open System
-    open System.Collections
     open System.Collections.Generic
-    open System.Diagnostics
-    open System.Globalization
-    open System.Reflection
-    open System.Text
     
     type Unit() =
         override _.GetHashCode() = 0
@@ -373,6 +368,72 @@ namespace Microsoft.FSharp.Core
     [<Sealed>]
     type NoCompilerInliningAttribute() =
         inherit Attribute()
+
+// Definitions for attributes recognized by the IL Linker.
+// Guarded under ifdefs for future-proofing in case FSharp.Core ever targets .NET.
+namespace System.Diagnostics.CodeAnalysis
+
+    open System
+
+#if !NET5_0_OR_GREATER
+    type internal DynamicallyAccessedMemberTypes =
+        | None = 0
+        | PublicParameterlessConstructor = 1
+        | PublicConstructors = 3
+        | NonPublicConstructors = 4
+        | PublicMethods = 8
+        | NonPublicMethods = 0x10
+        | PublicFields = 0x20
+        | NonPublicFields = 0x40
+        | PublicNestedTypes = 0x80
+        | NonPublicNestedTypes = 0x100
+        | PublicProperties = 0x200
+        | NonPublicProperties = 0x400
+        | PublicEvents = 0x800
+        | NonPublicEvents = 0x1000
+        | Interfaces = 0x2000
+        | All = -1
+
+    [<AttributeUsage(AttributeTargets.Class ||| AttributeTargets.Field ||| AttributeTargets.GenericParameter |||
+                     AttributeTargets.Interface ||| AttributeTargets.Method ||| AttributeTargets.Parameter |||
+                     AttributeTargets.Property ||| AttributeTargets.ReturnValue ||| AttributeTargets.Struct)>]
+    type internal DynamicallyAccessedMembersAttribute(memberTypes: DynamicallyAccessedMemberTypes) =
+        inherit Attribute()
+        member _.MemberTypes = memberTypes
+
+    [<AttributeUsage(AttributeTargets.Class ||| AttributeTargets.Constructor ||| AttributeTargets.Method)>]
+    type internal RequiresUnreferencedCodeAttribute(message: String) =
+        inherit Attribute()
+        member _.Message = message
+        member val Uri = "" with get, set
+    
+    [<AttributeUsage(AttributeTargets.All, AllowMultiple = true)>]
+    type internal UnconditionalSuppressMessageAttribute(category: String, checkId: String) =
+        inherit Attribute()
+        member _.Category = category
+        member _.CheckId = checkId
+        member val Scope = "" with get, set
+        member val Target = "" with get, set
+        member val MessageId = "" with get, set
+        member val Justification = "" with get, set
+#endif
+
+#if !NET7_0_OR_GREATER
+    [<AttributeUsage(AttributeTargets.Class ||| AttributeTargets.Constructor ||| AttributeTargets.Method)>]
+    type internal RequiresDynamicCodeAttribute(message: String) =
+        inherit Attribute()
+        member _.Message = message
+        member val Uri = "" with get, set
+#endif
+
+namespace Microsoft.FSharp.Core
+
+    open System
+    open System.Collections
+    open System.Collections.Generic
+    open System.Diagnostics.CodeAnalysis
+    open System.Globalization
+    open System.Reflection
 
     [<MeasureAnnotatedAbbreviation>] type float<[<Measure>] 'Measure> = float 
     [<MeasureAnnotatedAbbreviation>] type float32<[<Measure>] 'Measure> = float32

@@ -5927,6 +5927,65 @@ namespace Microsoft.FSharp.Control
         [<System.Obsolete("This type is obsolete. Please use System.Lazy instead.", true)>]
         'T ``lazy`` = System.Lazy<'T>        
 
+namespace System.Diagnostics.CodeAnalysis
+
+    open System
+
+#if !NET5_0_OR_GREATER
+    type internal DynamicallyAccessedMemberTypes =
+        | None = 0
+        | PublicParameterlessConstructor = 1
+        | PublicConstructors = 3
+        | NonPublicConstructors = 4
+        | PublicMethods = 8
+        | NonPublicMethods = 0x10
+        | PublicFields = 0x20
+        | NonPublicFields = 0x40
+        | PublicNestedTypes = 0x80
+        | NonPublicNestedTypes = 0x100
+        | PublicProperties = 0x200
+        | NonPublicProperties = 0x400
+        | PublicEvents = 0x800
+        | NonPublicEvents = 0x1000
+        | Interfaces = 0x2000
+        | All = -1
+
+    [<AttributeUsage(AttributeTargets.Class ||| AttributeTargets.Field ||| AttributeTargets.GenericParameter |||
+                     AttributeTargets.Interface ||| AttributeTargets.Method ||| AttributeTargets.Parameter |||
+                     AttributeTargets.Property ||| AttributeTargets.ReturnValue ||| AttributeTargets.Struct)>]
+    type internal DynamicallyAccessedMembersAttribute =
+        inherit Attribute
+        new: memberTypes:DynamicallyAccessedMemberTypes -> DynamicallyAccessedMembersAttribute
+        member MemberTypes: DynamicallyAccessedMemberTypes
+
+    [<AttributeUsage(AttributeTargets.Class ||| AttributeTargets.Constructor ||| AttributeTargets.Method)>]
+    type internal RequiresUnreferencedCodeAttribute =
+        inherit Attribute
+        new: message:String -> RequiresUnreferencedCodeAttribute
+        member Message: String
+        member Uri: String with get, set
+
+    [<AttributeUsage(AttributeTargets.All, AllowMultiple = true)>]
+    type internal UnconditionalSuppressMessageAttribute =
+        inherit Attribute
+        new: category:String * checkId:String -> UnconditionalSuppressMessageAttribute
+        member Category: String
+        member CheckId: String
+        member Scope: String with get, set
+        member Target: String with get, set
+        member MessageId: String with get, set
+        member Justification: String with get, set
+#endif
+
+#if !NET7_0_OR_GREATER
+    [<AttributeUsage(AttributeTargets.Class ||| AttributeTargets.Constructor ||| AttributeTargets.Method)>]
+    type internal RequiresDynamicCodeAttribute =
+        inherit Attribute
+        new: message:String -> RequiresDynamicCodeAttribute
+        member Message: String
+        member Uri: String with get, set
+#endif
+
 namespace Microsoft.FSharp.Control
 
     open Microsoft.FSharp.Core
